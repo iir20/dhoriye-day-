@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CorruptionReport, CorruptionCategory } from './types';
+import { INITIAL_SEEDS } from './initialSeeds';
 import MapBangladesh from './components/MapBangladesh';
 import ReportSubmission from './components/ReportSubmission';
 import Leaderboard from './components/Leaderboard';
@@ -51,6 +52,7 @@ export default function App() {
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [citizenId, setCitizenId] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+  const [offlineMode, setOfflineMode] = useState<boolean>(false);
 
   // Geo coordinate carrier variables (when user clicks SVG map)
   const [coordsDivision, setCoordsDivision] = useState<string>('');
@@ -69,21 +71,41 @@ export default function App() {
     setCitizenId(savedId);
   }, []);
 
-  // 2. Load reports from full-stack Express API
+  // 2. Load reports with full-stack API and LocalStorage fallback
   const fetchReportsList = async () => {
     setLoading(true);
     try {
+      // Direct detection if hosted on GitHub static Pages or without active proxy
+      const isGitHubPages = window.location.hostname.includes('github.io');
+      if (isGitHubPages) {
+        throw new Error("GitHub static environment detected. Activating offline local database.");
+      }
+
       const response = await fetch('/api/reports');
       if (response.ok) {
         const data = await response.json();
-        setReports(data);
-        // default select first report if details panel empty
-        if (data.length > 0 && !selectedReport) {
-          // setSelectedReport(data[0]); // keep optional
+        if (data && data.length > 0) {
+          setReports(data);
+          localStorage.setItem('dhoraiya_reports', JSON.stringify(data));
+        } else {
+          // If server reports db is empty/newly initialized, seed with the initial samples
+          setReports(INITIAL_SEEDS);
+          localStorage.setItem('dhoraiya_reports', JSON.stringify(INITIAL_SEEDS));
         }
+        setOfflineMode(false);
+      } else {
+        throw new Error("Server responded with error status. Switching to local state.");
       }
     } catch (e) {
-      console.error("Express API offline. Restoring browser fallback.", e);
+      console.log("Dhoraiya De is executing in Local Fallback Database Mode:", e);
+      setOfflineMode(true);
+      const cached = localStorage.getItem('dhoraiya_reports');
+      if (cached) {
+        setReports(JSON.parse(cached));
+      } else {
+        localStorage.setItem('dhoraiya_reports', JSON.stringify(INITIAL_SEEDS));
+        setReports(INITIAL_SEEDS);
+      }
     } finally {
       setLoading(false);
     }
@@ -120,6 +142,34 @@ export default function App() {
 
   // 4. Voting Consensus Endpoint
   const handleVoteSubmission = async (reportId: string, isTrue: boolean) => {
+    if (offlineMode) {
+      const currentReports: CorruptionReport[] = JSON.parse(localStorage.getItem('dhoraiya_reports') || '[]');
+      const idx = currentReports.findIndex(r => r.id === reportId);
+      if (idx !== -1) {
+        const target = currentReports[idx];
+        const votedUserIds = target.votedUserIds || [];
+        if (votedUserIds.includes(citizenId)) {
+          alert(`🚨 STATUS WARNING: Identity has already voted on this case file.`);
+          soundPlayer.playWarning();
+          return;
+        }
+
+        const updated = {
+          ...target,
+          upvotes: isTrue ? target.upvotes + 1 : target.upvotes,
+          downvotes: !isTrue ? target.downvotes + 1 : target.downvotes,
+          votedUserIds: [...votedUserIds, citizenId]
+        };
+
+        currentReports[idx] = updated;
+        localStorage.setItem('dhoraiya_reports', JSON.stringify(currentReports));
+        setReports(currentReports);
+        setSelectedReport(updated);
+        soundPlayer.playNodeLocked();
+      }
+      return;
+    }
+
     try {
       const response = await fetch(`/api/reports/${reportId}/vote`, {
         method: 'POST',
@@ -150,6 +200,20 @@ export default function App() {
 
   // 5. Status Moderation Trigger (Admin)
   const handleAdminUpdateStatus = async (id: string, newStatus: CorruptionReport['status']) => {
+    if (offlineMode) {
+      const currentReports: CorruptionReport[] = JSON.parse(localStorage.getItem('dhoraiya_reports') || '[]');
+      const idx = currentReports.findIndex(r => r.id === id);
+      if (idx !== -1) {
+        const updated = { ...currentReports[idx], status: newStatus };
+        currentReports[idx] = updated;
+        localStorage.setItem('dhoraiya_reports', JSON.stringify(currentReports));
+        setReports(currentReports);
+        setSelectedReport(updated);
+        soundPlayer.playNodeLocked();
+      }
+      return;
+    }
+
     try {
       const response = await fetch(`/api/reports/${id}/moderation`, {
         method: 'POST',
@@ -169,6 +233,16 @@ export default function App() {
 
   // 6. Delete Spam Case Node Trigger (Admin)
   const handleAdminDeleteReport = async (id: string) => {
+    if (offlineMode) {
+      const currentReports: CorruptionReport[] = JSON.parse(localStorage.getItem('dhoraiya_reports') || '[]');
+      const updatedList = currentReports.filter(r => r.id !== id);
+      localStorage.setItem('dhoraiya_reports', JSON.stringify(updatedList));
+      setReports(updatedList);
+      setSelectedReport(null);
+      soundPlayer.playWarning();
+      return;
+    }
+
     try {
       const response = await fetch(`/api/reports/${id}`, {
         method: 'DELETE'
@@ -185,6 +259,29 @@ export default function App() {
 
   // 7. Append comment/timeline update from admin desk
   const handleAdminAddComment = async (id: string, titleName: string, detailText: string) => {
+    if (offlineMode) {
+      const currentReports: CorruptionReport[] = JSON.parse(localStorage.getItem('dhoraiya_reports') || '[]');
+      const idx = currentReports.findIndex(r => r.id === id);
+      if (idx !== -1) {
+        const timestamp = new Date().toISOString();
+        const updatedTimeline = [
+          ...currentReports[idx].timeline,
+          {
+            status: titleName,
+            description: detailText,
+            timestamp
+          }
+        ];
+        const updated = { ...currentReports[idx], timeline: updatedTimeline };
+        currentReports[idx] = updated;
+        localStorage.setItem('dhoraiya_reports', JSON.stringify(currentReports));
+        setReports(currentReports);
+        setSelectedReport(updated);
+        soundPlayer.playNodeLocked();
+      }
+      return;
+    }
+
     try {
       const response = await fetch(`/api/reports/${id}/comment`, {
         method: 'POST',
