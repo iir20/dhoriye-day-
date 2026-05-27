@@ -1,0 +1,6 @@
+{
+  "name": "ধরাইয়া দে — Bangladesh Accountability Portal",
+  "description": "An interactive, anonymous citizen platform for Bangladesh to report corruption, track public integrity on a live heatmap, and verify entries through collective community nodes.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
